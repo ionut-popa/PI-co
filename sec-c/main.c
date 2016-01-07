@@ -26,21 +26,21 @@ typedef struct _Match {
 typedef struct _ICodec {
     byte    *buffer;
     int     bufferLen;
-    int     currentByte;
+    long    currentByte;
     int     currentBitPos;
     int     currentBytePos;
 } ICodec;
 
 
-int window                              = (2 * 1024);
+int window                              = (32 * 1024);
+int windowBits                          = 15;
 int lookahead                           = 16;
 int lookaheadBits                       = 4;
-int windowBits                          = 11;
 
 int  monogramCount[256]                 = { 0 };
 int  monogramIndexAdd[256]              = { 0 };
 int  monogramIndexRemove[256]           = { 0 };
-int  monogramPositions[256][8 * 1024]   = { 0 };
+int  monogramPositions[256][32 * 1024]   = { 0 };
 
 
 
@@ -67,6 +67,14 @@ int mask[] = {0, 1, 3, 7, 15, 31, 63, 127, 255};
 void decodeInit(ICodec *decoder) {
     decoder->currentByte = 0;
     decoder->currentBitPos = 8;
+
+    decoder->currentByte =
+            decoder->buffer[decoder->currentBytePos + 0] << 0 |
+            decoder->buffer[decoder->currentBytePos + 1] << 8 |
+            decoder->buffer[decoder->currentBytePos + 2] << 16|
+            decoder->buffer[decoder->currentBytePos + 3] << 24;
+    decoder->currentBytePos += 1;
+
     memset(monogramCount, 0, 256 * sizeof(int));
     memset(monogramIndexAdd, 0, 256 * sizeof(int));
     memset(monogramIndexRemove, 0, 256 * sizeof(int));
@@ -97,12 +105,16 @@ inline long decodeInteger(ICodec *decoder, int totalBits) {
             totalBits -= currentBitPos;
             offset += currentBitPos;
             currentBitPos -= currentBitPos;
-            currentByte >>= currentBitPos;
+            //currentByte >>= currentBitPos;
 
-                currentBytePos++;
-                //if (currentBytePos < decoder->bufferLen) {
-                    currentByte = decoder->buffer[currentBytePos] & 0xFF;
-                //}
+                //currentBytePos++;
+                if (currentBytePos < decoder->bufferLen - 4) {
+                    currentByte = decoder->buffer[currentBytePos + 0] << 0 |
+                                  decoder->buffer[currentBytePos + 1] << 8 |
+                                  decoder->buffer[currentBytePos + 2] << 16|
+                                  decoder->buffer[currentBytePos + 3] << 24;
+                    currentBytePos += 1;
+                }
                 currentBitPos = 8;
         }
 //        if (currentBitPos == 0) {
