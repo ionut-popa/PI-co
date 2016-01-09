@@ -43,9 +43,10 @@ int  monogramIndexAdd[256]              = { 0 };
 int  monogramIndexRemove[256]           = { 0 };
 int  monogramPositions[256][32 * 1024]  = { 0 };
 
+#define FAST_LOG2(x) (sizeof(int) * 8 - 1 - __builtin_clz((int) (x) ) )
+#define FAST_LOG2_UP(x) (((x) - (1 << FAST_LOG2(x))) ? FAST_LOG2(x) + 1 : FAST_LOG2(x))
 
-
-static inline int log2int(int val) {
+static inline int log2int(int x) {
 //    if (val == 0) return 1000000;
 //    if (val == 1) return 0;
 //    int ret = 0;
@@ -54,29 +55,33 @@ static inline int log2int(int val) {
 //        ret++;
 //    }
 //    return ret;
-    return ceil(log2(val));
+//    return ceil(log2(x));
+//    return FAST_LOG2_UP(x);
+    return ((sizeof(unsigned int) * 8 - 1) - __builtin_clz(x)) + (!!(x & (x - 1)));
 }
 
 /////////////////////////////////////////////////////////////////////////////////////
 // BitStream encoding / decoding
 /////////////////////////////////////////////////////////////////////////////////////
 
+static int currentByte;
+static int currentBitPos;
+static int currentBytePos;
 
 /**
  * Initialize variable size integer decoder
  */
 void decodeInit(ICodec *decoder) {
-    decoder->currentByte = 0;
-    decoder->currentBitPos = 32;
+    currentBytePos = 0;
+    currentBitPos = 32;
 
-    decoder->currentByte =
-            decoder->buffer[decoder->currentBytePos + 0] << 0 |
-            decoder->buffer[decoder->currentBytePos + 1] << 8 |
-            decoder->buffer[decoder->currentBytePos + 2] << 16|
-            decoder->buffer[decoder->currentBytePos + 3] << 24;
-    decoder->currentBytePos += 4;
+    currentByte =
+            decoder->buffer[currentBytePos + 0] << 0 |
+            decoder->buffer[currentBytePos + 1] << 8 |
+            decoder->buffer[currentBytePos + 2] << 16|
+            decoder->buffer[currentBytePos + 3] << 24;
+    currentBytePos += 4;
 
-    memset(monogramCount, 0, 256 * sizeof(int));
     memset(monogramIndexAdd, 0, 256 * sizeof(int));
     memset(monogramIndexRemove, 0, 256 * sizeof(int));
     memset(monogramPositions, 0, 256 * window * sizeof(int));
@@ -106,46 +111,28 @@ inline long decodeInteger(ICodec *decoder, int totalBits) {
         return 0;
     }
 
-    int currentBitPos   = decoder->currentBitPos;
-    int currentBytePos  = decoder->currentBytePos;
-    int currentByte     = decoder->currentByte;
-
     do {
         if (totalBits < currentBitPos) {
             result |= (currentByte & mask[totalBits]) << offset;
             currentBitPos -= totalBits;
             currentByte >>= totalBits;
-            totalBits = 0;
             break;
         } else {
             result |= (currentByte & mask[currentBitPos]) << offset;
             totalBits -= currentBitPos;
             offset += currentBitPos;
-            //currentBitPos -= currentBitPos;
-            //currentByte >>= currentBitPos;
-
-                //currentBytePos++;
-                if (currentBytePos < decoder->bufferLen - 1) {
-                    currentByte = decoder->buffer[currentBytePos + 0] << 0 |
-                                  decoder->buffer[currentBytePos + 1] << 8 |
-                                  decoder->buffer[currentBytePos + 2] << 16|
-                                  decoder->buffer[currentBytePos + 3] << 24;
-                    currentBytePos += 4;
-                }
-                currentBitPos = 32;
+            currentByte = decoder->buffer[currentBytePos + 0] << 0 |
+                          decoder->buffer[currentBytePos + 1] << 8 |
+                          decoder->buffer[currentBytePos + 2] << 16|
+                          decoder->buffer[currentBytePos + 3] << 24;
+            currentBytePos += 4;
+            currentBitPos = 32;
         }
-//        if (currentBitPos == 0) {
-//            currentBytePos++;
-//            if (currentBytePos < decoder->bufferLen) {
-//                currentByte = decoder->buffer[currentBytePos] & 0xFF;
-//            }
-//            currentBitPos = 8;
-//        }
-    } while (totalBits > 0);
+    } while (1);
 
-    decoder->currentBitPos  = currentBitPos;
-    decoder->currentBytePos = currentBytePos;
-    decoder->currentByte    = currentByte;
+    //decoder->currentBitPos  = currentBitPos;
+    //decoder->currentBytePos = currentBytePos;
+    //decoder->currentByte    = currentByte;
 
     return result;
 }
@@ -341,6 +328,30 @@ static byte* compress3(byte input[], int inputLength, ICodec *encoder)  {
 
 static inline void updatePositions(byte *output, int oldPosition, int position) {
     int i;
+    if (oldPosition < window) {
+        int end = (position - window);
+        for (i = 0; i < end; i++) {
+            register int mm = output[i];
+            monogramIndexRemove[mm] = (monogramIndexRemove[mm] + 1) & (window_1);
+        }
+        for (i = oldPosition; i < position; i++) {
+            register int mm = output[i];
+            monogramPositions[mm][monogramIndexAdd[mm]] = i;
+            monogramIndexAdd[mm] = (monogramIndexAdd[mm] + 1) & (window_1);
+        }
+    } else {
+        for (i = oldPosition; i < position; i++) {
+            register int mm = output[i - window];
+            monogramIndexRemove[mm] = (monogramIndexRemove[mm] + 1) & (window_1);
+            mm = output[i];
+            monogramPositions[mm][monogramIndexAdd[mm]] = i;
+            monogramIndexAdd[mm] = (monogramIndexAdd[mm] + 1) & (window_1);
+        }
+    }
+}
+
+static inline void _updatePositions(byte *output, int oldPosition, int position) {
+    int i;
     int start = (oldPosition - window) < 0 ? 0 : (oldPosition - window);
     int end   = (position - window);
     for (i = start; i < end; i++) {
@@ -355,7 +366,6 @@ static inline void updatePositions(byte *output, int oldPosition, int position) 
         monogramPositions[mm][monogramIndexAdd[mm]] = i;
         monogramIndexAdd[mm] = (monogramIndexAdd[mm] + 1) & (window_1);
     }
-
 }
 
 
@@ -386,8 +396,8 @@ static byte* decompress3(ICodec *decoder, int *bufferLen) {
         if (length == 0) {
             //read
             int literal = (int) decodeInteger(decoder, 8);
-            output[position] = (byte) (literal & 0xFF);
-            position++;
+            output[position++] = literal;
+            //position++;
         } else {
             //read sync
             int sync = (int) decodeInteger(decoder, 1);
@@ -408,17 +418,17 @@ static byte* decompress3(ICodec *decoder, int *bufferLen) {
                 if (monogramCount < 0) {
                     monogramCount += window;
                 }
-                int matchPos = (int) decodeInteger(decoder, (int) ceil(log2(monogramCount - 1)));
+                int matchPos = (int) decodeInteger(decoder, (int) log2int(monogramCount - 1));
                 length += 1;
-                matchPos = monogramPositions[m][(monogramIndexRemove[m] + matchPos) % window];
+                matchPos = monogramPositions[m][(monogramIndexRemove[m] + matchPos) & window_1];
                 for (i = 1; i < length; i++) {
                     output[position] = output[matchPos + i];
                     position++;
                 }
             }
             int literal = (int) decodeInteger(decoder, 8);
-            output[position] = (byte) (literal & 0xFF);
-            position++;
+            output[position++] = literal;
+            //position++;
         }
 
         updatePositions(output, oldPosition, position);
