@@ -1,0 +1,7 @@
+SRC= ./src/sec-*.c 
+
+all:
+	gcc ${SRC} ./src/main.c -lm -O3 -o seclzw
+
+clean:
+	rm seclzw
