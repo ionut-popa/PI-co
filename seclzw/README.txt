@@ -43,6 +43,8 @@ but less efficient for less redundant data.
 HINT: data obtained from sensors usually contains small deviations. By preprocessing the data with 
 a delta encoding filter (e.g. new_data[i] = old_data[i] - old_data[i-1]) usually the signal is compressed
 better.
+Check utility script:
+./utils/csv_column_delta.sh 
 
 
 Key Features
@@ -90,7 +92,7 @@ Sample data sources
 #7. http://sun.aei.polsl.pl/~rstaros/mednat/mednat-medical.zip
 ./medical/
 
-
+#8. https://data.sparkfun.com/streams
 
 Further improvements
 ====================
